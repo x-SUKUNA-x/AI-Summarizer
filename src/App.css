@@ -1,0 +1,19 @@
+/* Use Tailwind utilities instead of custom CSS */
+.App-custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.App-custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.App-custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(82, 82, 91, 0.5);
+  /* zinc-600 */
+  border-radius: 10px;
+}
+
+.App-custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(113, 113, 122, 0.8);
+  /* zinc-500 */
+}
