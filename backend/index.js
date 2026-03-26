@@ -19,10 +19,16 @@ import summariesRoutes from './routes/summaries.js';
 const app = express();
 
 // ── CORS — allow credentials so cookies are sent ──────────────────────────────
+const ALLOWED_ORIGINS = [
+    /^http:\/\/localhost:\d+$/,                    // any local port (dev)
+    process.env.FRONTEND_URL,                      // e.g. https://your-app.vercel.app
+].filter(Boolean);
+
 app.use(cors({
     origin: (origin, callback) => {
-        // Allow any localhost origin (any port) + requests with no origin (curl, Postman)
-        if (!origin || /^http:\/\/localhost:\d+$/.test(origin)) {
+        if (!origin || ALLOWED_ORIGINS.some(o =>
+            o instanceof RegExp ? o.test(origin) : o === origin
+        )) {
             callback(null, true);
         } else {
             callback(new Error('Not allowed by CORS'));
