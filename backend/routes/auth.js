@@ -10,8 +10,8 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 const COOKIE_OPTS = {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: true,         // required for sameSite: 'none' (must be HTTPS)
+    sameSite: 'none',     // allows cross-origin cookies (Vercel → Render)
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
 };
 
@@ -71,7 +71,7 @@ router.get('/me', authMiddleware, (req, res) => {
 
 // POST /api/auth/logout
 router.post('/logout', (_req, res) => {
-    res.clearCookie('token').json({ success: true });
+    res.clearCookie('token', COOKIE_OPTS).json({ success: true });
 });
 
 export default router;

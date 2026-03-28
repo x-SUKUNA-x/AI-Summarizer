@@ -1,7 +1,7 @@
 /* global process */
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-123';
+const JWT_SECRET = process.env.JWT_SECRET; // index.js already exits if this is missing
 
 /**
  * Reads JWT from:
