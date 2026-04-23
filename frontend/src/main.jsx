@@ -6,6 +6,7 @@ import App from './App.jsx'
 import Login from './components/auth/Login.jsx'
 import Signup from './components/auth/Signup.jsx'
 import Profile from './Profile.jsx'
+import StockPage from './StockPage.jsx'
 import { AuthProvider } from './AuthContext.jsx'
 
 createRoot(document.getElementById('root')).render(
@@ -17,6 +18,7 @@ createRoot(document.getElementById('root')).render(
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/profile" element={<Profile />} />
+          <Route path="/stock" element={<StockPage />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

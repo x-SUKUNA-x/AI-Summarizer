@@ -90,4 +90,12 @@ export const api = {
         if (!res.ok) throw new Error('Failed to delete summary');
         return res.json();
     },
+
+    // ── Stock ─────────────────────────────────────────────────────────────────
+    // GET /api/stock/:ticker → { price, change, volume }
+    getStock: async (ticker) => {
+        const res = await req(`/stock/${encodeURIComponent(ticker.toUpperCase())}`);
+        if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed to fetch stock data'); }
+        return res.json(); // { price, change, volume }
+    },
 };

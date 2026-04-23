@@ -15,6 +15,7 @@ if (!process.env.JWT_SECRET) {
 import authRoutes from './routes/auth.js';
 import summarizeRoutes from './routes/summarize.js';
 import summariesRoutes from './routes/summaries.js';
+import stockRoutes from './routes/stock.js';
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.use(cookieParser());  // parse HTTP-only cookies
 app.use('/api/auth', authRoutes);
 app.use('/api', summarizeRoutes);   // /api/transcribe, /api/summarize, /api/correct
 app.use('/api/summaries', summariesRoutes);
+app.use('/api/stock', stockRoutes); // /api/stock/:ticker
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));

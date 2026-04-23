@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Sparkles, User } from 'lucide-react';
+import { Sparkles, User, BarChart2 } from 'lucide-react';
 import { useMicrophone } from './useMicrophone';
 import { useSpeech } from './hooks/useSpeech';
 import { transcribeAudio } from './groqApi';
@@ -137,11 +137,19 @@ function App() {
             AI Summarizer
           </span>
         </div>
-        <Link to="/profile"
-          className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-white transition-colors border border-zinc-800 hover:border-zinc-600 px-3 py-1.5 rounded-xl bg-zinc-900/60 hover:bg-zinc-800/60"
-        >
-          <User size={13} /> Profile
-        </Link>
+        {/* Nav links grouped on the right — wrapping in div keeps them together under justify-between */}
+        <div className="flex items-center gap-2">
+          <Link to="/stock"
+            className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-white transition-colors border border-zinc-800 hover:border-zinc-600 px-3 py-1.5 rounded-xl bg-zinc-900/60 hover:bg-zinc-800/60"
+          >
+            <BarChart2 size={13} /> Stocks
+          </Link>
+          <Link to="/profile"
+            className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-white transition-colors border border-zinc-800 hover:border-zinc-600 px-3 py-1.5 rounded-xl bg-zinc-900/60 hover:bg-zinc-800/60"
+          >
+            <User size={13} /> Profile
+          </Link>
+        </div>
       </header>
 
       {/* Chat area */}
