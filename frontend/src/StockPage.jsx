@@ -61,9 +61,9 @@ export default function StockPage() {
             const data = await api.getStock(clean);
             setStockData(data);
             setRecent(prev => [clean, ...prev.filter(t => t !== clean)].slice(0, 5));
-            // Only persist to history if we received a real price (guards against partial AV responses)
+            // Only persist to history if we received a real price (guards against partial responses)
             if (data.price !== 'N/A' && data.price > 0) {
-                await supabase.from('recent_searches').insert({ ticker: clean }).catch(() => {});
+                try { await supabase.from('recent_searches').insert({ ticker: clean }); } catch (_) {}
             }
             await checkWatchlist(clean);
         } catch (err) {

@@ -27,6 +27,12 @@ async function geminiGenerate(prompt, temperature = 0.1, maxAttempts = 3) {
             const msg = errData?.error?.message || '';
             const retryMatch = msg.match(/retry in ([\d.]+)s/i);
             const waitMs = retryMatch ? Math.ceil(parseFloat(retryMatch[1]) * 1000) + 500 : 20000;
+
+            if (waitMs > 5000) {
+                console.warn(`⚠️  Gemini wait time too long (${waitMs}ms). Failing fast.`);
+                throw new Error('Gemini rate limited (wait time too long).');
+            }
+
             console.warn(`⚠️  Gemini rate limited. Waiting ${waitMs}ms before retry (attempt ${attempt}/${maxAttempts})...`);
             if (attempt < maxAttempts) { await sleep(waitMs); continue; }
             throw new Error('Gemini is rate limited. Please wait a moment and try again.');
@@ -201,8 +207,8 @@ EDGE CASE 2: If the change is 0.00%, explain that the price has remained complet
 Output ONLY the sentences separated by \\n\\n. No intros, no outros, no markdown bullet points.`;
 
     try {
-        // geminiGenerate retries up to 3 times with backoff on rate-limit errors.
-        const insight = await geminiGenerate(prompt, 0.1);
+        // geminiGenerate disabled retries (maxAttempts=1) to prevent UI hanging.
+        const insight = await geminiGenerate(prompt, 0.1, 1);
         return insight.trim();
     } catch (err) {
         // ── Smart Local Fallback ──────────────────────────────────────────────
