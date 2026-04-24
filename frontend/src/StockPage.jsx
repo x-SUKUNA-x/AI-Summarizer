@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TrendingUp, TrendingDown, ArrowLeft, Search, Loader2, BarChart2, Sparkles } from 'lucide-react';
 import { api } from './api';
+import { supabase } from './supabaseClient';
 
 // ── StockPage ─────────────────────────────────────────────────────────────────
 // Standalone page accessible at /stock.
@@ -10,54 +11,86 @@ import { api } from './api';
 //   price, change percent, and volume — fetched via our Express backend.
 // ─────────────────────────────────────────────────────────────────────────────
 export default function StockPage() {
+
     // ── Local state ──────────────────────────────────────────────────────────
-    const [ticker, setTicker]   = useState('');       // controlled input value
-    const [stockData, setStockData] = useState(null); // { price, change, volume }
-    const [loading, setLoading] = useState(false);
-    const [error, setError]     = useState('');       // user-facing error message
-
-    // ── Handle Fetch ─────────────────────────────────────────────────────────
-    // Called when user clicks "Fetch Data" or presses Enter.
-    // Delegates to handleFetchFor with the current ticker state value.
-    const handleFetch = () => handleFetchFor(ticker);
-
-    // ── Input change handler ───────────────────────────────────────────────
-    // Strip any non-letter characters as the user types (tickers are always alpha).
-    // toUpperCase() auto-capitalises so the user never needs to think about case.
-    const handleTickerChange = (e) => {
-        const lettersOnly = e.target.value.replace(/[^a-zA-Z]/g, '').toUpperCase();
-        setTicker(lettersOnly);
-    };
-
-    // ── Allow Enter key to trigger fetch ──────────────────────────────────
-    const handleKeyDown = (e) => {
-        if (e.key === 'Enter') handleFetch();
-    };
+    const [ticker, setTicker]                 = useState('');    // controlled input
+    const [stockData, setStockData]           = useState(null);  // { price, change, volume, insight }
+    const [loading, setLoading]               = useState(false);
+    const [error, setError]                   = useState('');    // user-facing error
+    const [recentSearches, setRecentSearches] = useState([]);    // cloud-persisted history
 
     // ── Popular tickers — default quick-search suggestions ───────────────────
-    // Why: New users often don’t know which tickers to try. This list gives them
+    // Why: New users often don't know which tickers to try. This list gives them
     // a zero-typing entry point covering the most commonly searched symbols.
-    // Kept outside the render cycle to avoid re-creation on every render.
     const POPULAR_TICKERS = ['AAPL', 'TSLA', 'NVDA', 'GOOGL', 'MSFT'];
 
-    // ── handleQuickSearch ─────────────────────────────────────────────────────
-    // Why: React’s setTicker() is asynchronous — if we call setTicker(symbol)
-    // and then immediately call handleFetch(), handleFetch reads the old ticker
-    // value from the stale closure and fetches the wrong thing.
+    // ── Hook: Load Recent Searches from Supabase ─────────────────────────────
+    // Why: On mount, we fetch the user's global search history from the cloud
+    // so it persists across devices and browser sessions. localStorage would
+    // only survive on one machine; Supabase gives us real cross-device sync.
+    // Ordered by newest first, capped at 5 unique tickers to keep the row compact.
+    // Wrapped in its own async function because useEffect cannot be async itself.
+    useEffect(() => {
+        async function fetchRecentSearches() {
+            try {
+                const { data, error: dbErr } = await supabase
+                    .from('recent_searches')
+                    .select('ticker')
+                    .order('created_at', { ascending: false })
+                    .limit(20); // fetch extras so de-dup still yields 5 unique
+
+                if (dbErr) throw dbErr;
+
+                // De-duplicate — the same ticker may appear many times.
+                // We only show each symbol once, in most-recent-first order.
+                const unique = [...new Set(data.map((r) => r.ticker))].slice(0, 5);
+                setRecentSearches(unique);
+            } catch (err) {
+                // Non-fatal — the page still works; history simply won't load.
+                console.error('fetchRecentSearches: could not load history —', err.message);
+            }
+        }
+
+        fetchRecentSearches();
+    }, []); // run once on mount
+
+    // ── Action: Persist Successful Search to Cloud ───────────────────────────
+    // Why: We save every successful stock lookup to Supabase so the user gets
+    // persistent cross-device history.
     //
-    // Solution: we call setTicker() to update the visible input, and separately
-    // pass the symbol string directly to the fetch logic via an optional
-    // overrideTicker parameter, bypassing the async state entirely.
-    const handleQuickSearch = (symbol) => {
-        setTicker(symbol);          // update the input UI immediately
-        handleFetchFor(symbol);     // kick off fetch with the known-correct value
+    // OPTIMISTIC UI UPDATE: The local state is updated immediately (before the
+    // DB insert resolves) so the chip appears instantly with no visible latency.
+    // The DB write happens in the background — errors are swallowed silently so
+    // they never interrupt the stock data flow.
+    //
+    // De-duplication: if the ticker is already in state, it is moved to the
+    // front (most-recently-used order) rather than added as a duplicate.
+    const saveSearchToHistory = async (sym) => {
+        // Optimistic UI — update state immediately, don't wait for DB
+        setRecentSearches((prev) => {
+            const filtered = prev.filter((t) => t !== sym); // remove if already present
+            return [sym, ...filtered].slice(0, 5);           // prepend + cap at 5
+        });
+
+        // Background DB insert
+        try {
+            const { error: dbErr } = await supabase
+                .from('recent_searches')
+                .insert({ ticker: sym });
+
+            if (dbErr) throw dbErr;
+        } catch (err) {
+            console.error('saveSearchToHistory: DB insert failed —', err.message);
+        }
     };
 
     // ── handleFetchFor(symbol) ────────────────────────────────────────────────
-    // Core fetch logic extracted so it can be called with an explicit symbol
-    // (for chip clicks) OR with the current ticker state (for the button/Enter).
-    // handleFetch() is kept as the button’s handler and calls handleFetchFor
-    // with the current state value.
+    // Core fetch logic — accepts an explicit symbol string so it can be called
+    // from both chip clicks (known value) and the button/Enter (state value),
+    // bypassing the async state-update race condition entirely.
+    //
+    // saveSearchToHistory is called ONLY on success — failed queries (invalid
+    // tickers, rate limits) are never persisted to history.
     const handleFetchFor = async (symbol) => {
         const cleaned = symbol.trim().toUpperCase();
         if (!cleaned) {
@@ -72,6 +105,7 @@ export default function StockPage() {
         try {
             const data = await api.getStock(cleaned);
             setStockData(data);
+            await saveSearchToHistory(cleaned); // persist on success only
         } catch (err) {
             setError(err.message || 'Something went wrong. Please try again.');
         } finally {
@@ -79,16 +113,44 @@ export default function StockPage() {
         }
     };
 
-    // ── Determine if change is positive or negative for colour coding ─────────
+    // ── handleFetch ───────────────────────────────────────────────────────────
+    // Thin wrapper — reads the current ticker state and passes it to
+    // handleFetchFor. Used by the button onClick and the Enter-key handler.
+    const handleFetch = () => handleFetchFor(ticker);
+
+    // ── handleQuickSearch ─────────────────────────────────────────────────────
+    // Why: React's setTicker() is asynchronous — calling setTicker(symbol) then
+    // handleFetch() immediately would read the old ticker from the stale closure.
+    // We bypass this by passing symbol directly to handleFetchFor instead,
+    // while also calling setTicker so the input field visually updates.
+    const handleQuickSearch = (symbol) => {
+        setTicker(symbol);
+        handleFetchFor(symbol);
+    };
+
+    // ── Input change handler ──────────────────────────────────────────────────
+    // Strip any non-letter characters as the user types (tickers are always alpha).
+    // toUpperCase() auto-capitalises so the user never needs to worry about case.
+    const handleTickerChange = (e) => {
+        const lettersOnly = e.target.value.replace(/[^a-zA-Z]/g, '').toUpperCase();
+        setTicker(lettersOnly);
+    };
+
+    // ── Allow Enter key to trigger fetch ─────────────────────────────────────
+    const handleKeyDown = (e) => {
+        if (e.key === 'Enter') handleFetch();
+    };
+
+    // ── Colour coding helper ──────────────────────────────────────────────────
     const isPositive = typeof stockData?.change === 'number' && stockData.change >= 0;
 
-    // ── UI Rendering ─────────────────────────────────────────────────────────
+    // ── UI Rendering ──────────────────────────────────────────────────────────
     return (
         <div
             className="min-h-screen bg-[#08080a] text-zinc-100"
             style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
         >
-            {/* ── Ambient background (matches Profile.jsx style) ─────────────── */}
+            {/* Ambient background */}
             <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-[500px] bg-gradient-to-b from-indigo-950/20 to-transparent" />
                 <div className="absolute top-20 left-1/3 w-[500px] h-[500px] bg-indigo-600/6 rounded-full blur-[140px]" />
@@ -97,7 +159,7 @@ export default function StockPage() {
 
             <div className="relative z-10 max-w-3xl mx-auto px-6 py-8">
 
-                {/* ── Top nav ──────────────────────────────────────────────── */}
+                {/* Top nav */}
                 <div className="flex items-center justify-between mb-8">
                     <Link
                         to="/"
@@ -108,7 +170,7 @@ export default function StockPage() {
                     </Link>
                 </div>
 
-                {/* ── Page header ──────────────────────────────────────────── */}
+                {/* Page header */}
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -124,18 +186,21 @@ export default function StockPage() {
                     </p>
                 </motion.div>
 
-                {/* ── Search card ──────────────────────────────────────────── */}
+                {/* ── Search card ───────────────────────────────────────────── */}
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.4, delay: 0.1 }}
                     className="relative rounded-2xl bg-[#0f0f12] border border-white/[0.07] p-6 mb-4"
                 >
-                    <label htmlFor="stock-ticker-input" className="block text-xs text-zinc-500 uppercase tracking-widest font-semibold mb-3">
+                    <label
+                        htmlFor="stock-ticker-input"
+                        className="block text-xs text-zinc-500 uppercase tracking-widest font-semibold mb-3"
+                    >
                         Ticker Symbol
                     </label>
 
-                    {/* ── Input + Button row ──────────────────────────────── */}
+                    {/* Input + Button row */}
                     <div className="flex gap-3">
                         <input
                             id="stock-ticker-input"
@@ -167,19 +232,45 @@ export default function StockPage() {
                                 transition-all duration-300 hover:-translate-y-0.5 active:scale-95
                             "
                         >
-                            {loading
-                                ? <Loader2 size={15} className="animate-spin" />
-                                : <Search size={15} />
-                            }
+                            {loading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
                             {loading ? 'Fetching…' : 'Fetch Data'}
                         </button>
                     </div>
 
-                    {/* ── Popular Stocks Quick Chips ─────────────────────────── */}
-                    {/* Why: Provides a frictionless entry point for new users who */}
-                    {/* don’t know which tickers to type. One click populates the  */}
-                    {/* input AND triggers the fetch — no extra step needed.       */}
-                    <div className="flex items-center gap-2 mt-4 flex-wrap">
+                    {/* ── Recent Searches Chips ─────────────────────────────── */}
+                    {/* Why: Cloud-persisted history lets returning users re-run  */}
+                    {/* their last searches in one click. Only shown when at      */}
+                    {/* least one search has been saved to Supabase.              */}
+                    {recentSearches.length > 0 && (
+                        <div className="flex items-center gap-2 mt-4 flex-wrap">
+                            <span className="text-[10px] text-zinc-600 uppercase tracking-widest font-semibold">
+                                Recent:
+                            </span>
+                            {recentSearches.map((sym) => (
+                                <button
+                                    key={sym}
+                                    id={`recent-chip-${sym.toLowerCase()}`}
+                                    onClick={() => handleQuickSearch(sym)}
+                                    disabled={loading}
+                                    className="
+                                        px-3 py-1 rounded-full text-[11px] font-semibold tracking-wider
+                                        bg-zinc-800/60 border border-zinc-700/50 text-zinc-400
+                                        hover:bg-zinc-700/60 hover:border-zinc-600/60 hover:text-zinc-200
+                                        disabled:opacity-40 disabled:cursor-not-allowed
+                                        transition-all duration-200 cursor-pointer
+                                    "
+                                >
+                                    {sym}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* ── Popular Stocks Quick Chips ────────────────────────── */}
+                    {/* Why: Provides a frictionless entry point for new users   */}
+                    {/* who don't know which tickers to type. One click populates */}
+                    {/* the input AND triggers the fetch — no extra step needed. */}
+                    <div className="flex items-center gap-2 mt-3 flex-wrap">
                         <span className="text-[10px] text-zinc-600 uppercase tracking-widest font-semibold">
                             Popular:
                         </span>
@@ -204,7 +295,7 @@ export default function StockPage() {
 
                 </motion.div>
 
-                {/* ── Error state ──────────────────────────────────────────── */}
+                {/* ── Error state ───────────────────────────────────────────── */}
                 <AnimatePresence>
                     {error && (
                         <motion.div
@@ -219,8 +310,8 @@ export default function StockPage() {
                     )}
                 </AnimatePresence>
 
-                {/* ── Empty state ────────────────────────────────────────────── */}
-                {/* Shown before the first successful fetch — gives demo a clean open state */}
+                {/* ── Empty state ───────────────────────────────────────────── */}
+                {/* Shown before the first successful fetch */}
                 <AnimatePresence>
                     {!stockData && !loading && !error && (
                         <motion.div
@@ -239,12 +330,9 @@ export default function StockPage() {
                     )}
                 </AnimatePresence>
 
-                {/* ── Loading shimmer ─────────────────────────────────────── */}
-                {/* Shown while fetch is in-flight. stockData is null at this point */}
-                {/* so this is the only place where the shimmer can actually render. */}
+                {/* ── Loading shimmer ───────────────────────────────────────── */}
                 {loading && (
                     <div className="space-y-3 mt-2 animate-pulse">
-                        {/* Stat card skeletons — 3 columns matching the real grid */}
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             {[...Array(3)].map((_, i) => (
                                 <div key={i} className="rounded-2xl bg-[#0f0f12] border border-white/[0.05] p-5 space-y-3">
@@ -253,7 +341,6 @@ export default function StockPage() {
                                 </div>
                             ))}
                         </div>
-                        {/* AI insight skeleton */}
                         <div className="rounded-2xl bg-[#0f0f12] border border-indigo-500/10 p-5 space-y-2">
                             <div className="h-2.5 w-20 rounded bg-indigo-500/10" />
                             <div className="h-2.5 w-full rounded bg-white/[0.04]" />
@@ -262,7 +349,7 @@ export default function StockPage() {
                     </div>
                 )}
 
-                {/* ── Results ──────────────────────────────────────────────── */}
+                {/* ── Results ───────────────────────────────────────────────── */}
                 <AnimatePresence>
                     {stockData && (
                         <motion.div
@@ -280,18 +367,14 @@ export default function StockPage() {
                                 </span>
                             </div>
 
-                            {/* ── Stat cards grid ─────────────────────────── */}
+                            {/* Stat cards grid */}
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-
-                                {/* Price */}
                                 <StatCard
                                     label="Price"
                                     value={stockData.price !== 'N/A' ? `$${stockData.price.toFixed(2)}` : 'N/A'}
                                     accent="indigo"
                                     delay={0}
                                 />
-
-                                {/* Change % */}
                                 <StatCard
                                     label="Change"
                                     value={
@@ -309,8 +392,6 @@ export default function StockPage() {
                                     }
                                     delay={0.05}
                                 />
-
-                                {/* Volume */}
                                 <StatCard
                                     label="Volume"
                                     value={
@@ -323,10 +404,7 @@ export default function StockPage() {
                                 />
                             </div>
 
-                            {/* ── AI Insight (Phase 2) ─────────────────────────────── */}
-                            {/* Only renders when backend returns an insight string.  */}
-                            {/* Loading / error states naturally produce no stockData, */}
-                            {/* so this block is invisible in those cases.            */}
+                            {/* AI Insight */}
                             {stockData.insight && (
                                 <motion.div
                                     initial={{ opacity: 0, y: 12 }}
@@ -334,36 +412,32 @@ export default function StockPage() {
                                     transition={{ delay: 0.18, duration: 0.35 }}
                                     className="mt-4 rounded-2xl bg-[#0f0f12] border border-indigo-500/15 p-5 relative overflow-hidden"
                                 >
-                                    {/* Subtle ambient glow */}
                                     <div className="absolute -top-6 -right-6 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-
-                                    {/* Section label */}
                                     <div className="flex items-center gap-2 mb-3">
                                         <Sparkles size={13} className="text-indigo-400" />
                                         <p className="text-[10px] uppercase tracking-widest font-semibold text-indigo-400">
                                             AI Insight
                                         </p>
                                     </div>
-
-                                    {/* Insight text — plain prose, no formatting */}
-                                    <p className="text-sm text-zinc-300 leading-relaxed">
-                                        {stockData.insight}
-                                    </p>
-
-                                    {/* Disclaimer — makes the AI nature of this explicit */}
+                                    {stockData.insight.split('\n\n').map((sentence, i) => (
+                                        <p key={i} className="text-sm text-zinc-300 leading-relaxed mb-2 last:mb-0">
+                                            {sentence}
+                                        </p>
+                                    ))}
                                     <p className="text-[10px] text-zinc-600 mt-3">
                                         Generated by Gemini · Strictly factual · Not financial advice
                                     </p>
                                 </motion.div>
                             )}
 
-                            {/* Data source attribution */}
+                            {/* Attribution */}
                             <p className="text-[10px] text-zinc-700 mt-4 text-center">
                                 Data via Alpha Vantage · Prices may be delayed 15–20 min
                             </p>
                         </motion.div>
                     )}
                 </AnimatePresence>
+
             </div>
         </div>
     );
@@ -375,11 +449,10 @@ export default function StockPage() {
 //   label  — metric name (string)
 //   value  — formatted display value (string)
 //   accent — colour variant: 'indigo' | 'emerald' | 'rose' | 'purple'
-//   icon   — optional lucide icon element (shown next to label)
+//   icon   — optional lucide icon element shown next to label
 //   delay  — framer-motion stagger delay (number, seconds)
 // ─────────────────────────────────────────────────────────────────────────────
 function StatCard({ label, value, accent, icon = null, delay = 0 }) {
-    // Tailwind colour maps — avoids dynamic class generation (Tailwind purges dynamic classes)
     const accentStyles = {
         indigo:  { border: 'border-indigo-500/20',  glow: 'bg-indigo-500/20',  text: 'text-indigo-400'  },
         emerald: { border: 'border-emerald-500/20', glow: 'bg-emerald-500/15', text: 'text-emerald-400' },
@@ -395,18 +468,13 @@ function StatCard({ label, value, accent, icon = null, delay = 0 }) {
             transition={{ delay, duration: 0.35 }}
             className={`relative rounded-2xl bg-[#0f0f12] border ${s.border} p-5 overflow-hidden group hover:border-opacity-60 transition-all`}
         >
-            {/* Ambient glow */}
             <div className={`absolute -top-4 -right-4 w-20 h-20 ${s.glow} rounded-full blur-2xl`} />
-
-            {/* Label row */}
             <div className="flex items-center gap-1.5 mb-3">
                 {icon}
                 <p className={`text-[10px] uppercase tracking-widest font-semibold ${s.text}`}>
                     {label}
                 </p>
             </div>
-
-            {/* Value */}
             <p className="text-2xl font-black text-white tabular-nums tracking-tight">
                 {value}
             </p>
