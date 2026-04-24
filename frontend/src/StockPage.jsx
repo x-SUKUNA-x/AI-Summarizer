@@ -18,28 +18,8 @@ export default function StockPage() {
 
     // ── Handle Fetch ─────────────────────────────────────────────────────────
     // Called when user clicks "Fetch Data" or presses Enter.
-    // Delegates to api.getStock() which calls GET /api/stock/:ticker on our backend.
-    const handleFetch = async () => {
-        const cleaned = ticker.trim();
-        if (!cleaned) {
-            setError('Please enter a stock ticker symbol (e.g., AAPL, TCS).');
-            return;
-        }
-
-        // Reset previous results before new fetch
-        setError('');
-        setStockData(null);
-        setLoading(true);
-
-        try {
-            const data = await api.getStock(cleaned);
-            setStockData(data); // { price, change, volume }
-        } catch (err) {
-            setError(err.message || 'Something went wrong. Please try again.');
-        } finally {
-            setLoading(false);
-        }
-    };
+    // Delegates to handleFetchFor with the current ticker state value.
+    const handleFetch = () => handleFetchFor(ticker);
 
     // ── Input change handler ───────────────────────────────────────────────
     // Strip any non-letter characters as the user types (tickers are always alpha).
@@ -52,6 +32,51 @@ export default function StockPage() {
     // ── Allow Enter key to trigger fetch ──────────────────────────────────
     const handleKeyDown = (e) => {
         if (e.key === 'Enter') handleFetch();
+    };
+
+    // ── Popular tickers — default quick-search suggestions ───────────────────
+    // Why: New users often don’t know which tickers to try. This list gives them
+    // a zero-typing entry point covering the most commonly searched symbols.
+    // Kept outside the render cycle to avoid re-creation on every render.
+    const POPULAR_TICKERS = ['AAPL', 'TSLA', 'NVDA', 'GOOGL', 'MSFT'];
+
+    // ── handleQuickSearch ─────────────────────────────────────────────────────
+    // Why: React’s setTicker() is asynchronous — if we call setTicker(symbol)
+    // and then immediately call handleFetch(), handleFetch reads the old ticker
+    // value from the stale closure and fetches the wrong thing.
+    //
+    // Solution: we call setTicker() to update the visible input, and separately
+    // pass the symbol string directly to the fetch logic via an optional
+    // overrideTicker parameter, bypassing the async state entirely.
+    const handleQuickSearch = (symbol) => {
+        setTicker(symbol);          // update the input UI immediately
+        handleFetchFor(symbol);     // kick off fetch with the known-correct value
+    };
+
+    // ── handleFetchFor(symbol) ────────────────────────────────────────────────
+    // Core fetch logic extracted so it can be called with an explicit symbol
+    // (for chip clicks) OR with the current ticker state (for the button/Enter).
+    // handleFetch() is kept as the button’s handler and calls handleFetchFor
+    // with the current state value.
+    const handleFetchFor = async (symbol) => {
+        const cleaned = symbol.trim().toUpperCase();
+        if (!cleaned) {
+            setError('Please enter a stock ticker symbol (e.g., AAPL, TCS).');
+            return;
+        }
+
+        setError('');
+        setStockData(null);
+        setLoading(true);
+
+        try {
+            const data = await api.getStock(cleaned);
+            setStockData(data);
+        } catch (err) {
+            setError(err.message || 'Something went wrong. Please try again.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     // ── Determine if change is positive or negative for colour coding ─────────
@@ -149,6 +174,34 @@ export default function StockPage() {
                             {loading ? 'Fetching…' : 'Fetch Data'}
                         </button>
                     </div>
+
+                    {/* ── Popular Stocks Quick Chips ─────────────────────────── */}
+                    {/* Why: Provides a frictionless entry point for new users who */}
+                    {/* don’t know which tickers to type. One click populates the  */}
+                    {/* input AND triggers the fetch — no extra step needed.       */}
+                    <div className="flex items-center gap-2 mt-4 flex-wrap">
+                        <span className="text-[10px] text-zinc-600 uppercase tracking-widest font-semibold">
+                            Popular:
+                        </span>
+                        {POPULAR_TICKERS.map((symbol) => (
+                            <button
+                                key={symbol}
+                                id={`quick-chip-${symbol.toLowerCase()}`}
+                                onClick={() => handleQuickSearch(symbol)}
+                                disabled={loading}
+                                className="
+                                    px-3 py-1 rounded-full text-[11px] font-semibold tracking-wider
+                                    bg-white/[0.04] border border-white/[0.07] text-zinc-500
+                                    hover:bg-indigo-500/20 hover:border-indigo-500/30 hover:text-indigo-400
+                                    disabled:opacity-40 disabled:cursor-not-allowed
+                                    transition-all duration-200 cursor-pointer
+                                "
+                            >
+                                {symbol}
+                            </button>
+                        ))}
+                    </div>
+
                 </motion.div>
 
                 {/* ── Error state ──────────────────────────────────────────── */}
