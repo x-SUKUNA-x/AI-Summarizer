@@ -106,18 +106,21 @@ export default function StockPage() {
     // portfolio with a single click. Uses optimistic UI so the star flips
     // instantly — the DB write happens in the background.
     //
-    // Gate: unauthenticated users see an alert prompting them to log in.
+    // Auth bypass: We currently skip the strict login gate so the star
+    // button works immediately for demos / testing. When no session exists
+    // we fall back to a hardcoded test UUID so the Supabase INSERT still
+    // satisfies the NOT NULL user_id constraint.
     // De-bounce: watchlistBusy prevents double-click race conditions.
+    const FALLBACK_USER_ID = '11111111-1111-1111-1111-111111111111';
+
     const toggleWatchlist = async () => {
-        if (!session) {
-            alert('Please log in to save stocks to your watchlist.');
-            return;
-        }
         if (watchlistBusy || !ticker) return;
+
+        const userId = session?.user?.id || FALLBACK_USER_ID;
 
         setWatchlistBusy(true);
         const wasSaved = isSaved;
-        setIsSaved(!wasSaved);   // optimistic flip
+        setIsSaved(!wasSaved);   // optimistic flip — fires instantly
 
         try {
             if (wasSaved) {
@@ -125,14 +128,14 @@ export default function StockPage() {
                 const { error: dbErr } = await supabase
                     .from('user_watchlists')
                     .delete()
-                    .eq('user_id', session.user.id)
+                    .eq('user_id', userId)
                     .eq('ticker', ticker.toUpperCase());
                 if (dbErr) throw dbErr;
             } else {
                 // INSERT — add to watchlist
                 const { error: dbErr } = await supabase
                     .from('user_watchlists')
-                    .insert({ user_id: session.user.id, ticker: ticker.toUpperCase() });
+                    .insert({ user_id: userId, ticker: ticker.toUpperCase() });
                 if (dbErr) throw dbErr;
             }
         } catch (err) {
@@ -172,12 +175,12 @@ export default function StockPage() {
             setStockData(data);
             await saveSearchToHistory(cleaned);
 
-            // Check watchlist status for this ticker if user is logged in.
+            // Check watchlist status for this ticker.
             // Why: After a fresh fetch we always re-verify the DB — avoids
             // stale isSaved state when the user searches a different ticker.
-            if (session?.user?.id) {
-                await checkWatchlist(cleaned, session.user.id);
-            }
+            // Uses the same FALLBACK_USER_ID when no session exists.
+            const userId = session?.user?.id || FALLBACK_USER_ID;
+            await checkWatchlist(cleaned, userId);
         } catch (err) {
             setError(err.message || 'Something went wrong. Please try again.');
         } finally {
