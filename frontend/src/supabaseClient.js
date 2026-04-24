@@ -21,6 +21,6 @@ if (!supabaseUrl || !supabaseAnon) {
 }
 
 export const supabase = createClient(
-    supabaseUrl  ?? '',
-    supabaseAnon ?? ''
+    supabaseUrl  || 'https://missing-env.supabase.co',
+    supabaseAnon || 'dummy-anon-key'
 );

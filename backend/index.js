@@ -16,6 +16,7 @@ import authRoutes from './routes/auth.js';
 import summarizeRoutes from './routes/summarize.js';
 import summariesRoutes from './routes/summaries.js';
 import stockRoutes from './routes/stock.js';
+import watchlistRoutes from './routes/watchlist.js';
 
 const app = express();
 
@@ -45,7 +46,8 @@ app.use(cookieParser());  // parse HTTP-only cookies
 app.use('/api/auth', authRoutes);
 app.use('/api', summarizeRoutes);   // /api/transcribe, /api/summarize, /api/correct
 app.use('/api/summaries', summariesRoutes);
-app.use('/api/stock', stockRoutes); // /api/stock/:ticker
+app.use('/api/stock', stockRoutes);     // /api/stock/:ticker
+app.use('/api/watchlist', watchlistRoutes); // /api/watchlist
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));

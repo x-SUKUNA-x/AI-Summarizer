@@ -88,6 +88,9 @@ router.get('/:ticker', async (req, res) => {
     const newsUrl  = `${AV_BASE_URL}?function=NEWS_SENTIMENT&tickers=${encodeURIComponent(cacheKey)}&apikey=${apiKey}`;
 
     try {
+        // ── Key guard (temporary dev log) ─────────────────────────────────────
+        console.log('Using AV Key:', process.env.STOCK_API_KEY ? 'Loaded ✅' : 'MISSING ❌');
+
         // ── Action: Fetch Market Context (Concurrent) ─────────────────────────
         // Why: Firing both requests concurrently with Promise.all means total wait
         // time is max(quoteTime, newsTime) not quoteTime + newsTime. On AV free
