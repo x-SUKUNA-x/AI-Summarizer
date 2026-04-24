@@ -136,23 +136,42 @@ Text:
     return await geminiGenerate(prompt, 0.1);
 }
 
-// ── Gemini stock analysis ─────────────────────────────────────────────────────
-// Generates a 2-sentence factual insight grounded strictly in the provided
-// stock data. Called after normalization in routes/stock.js.
+// ── Gemini stock analysis (Financial Educator) ───────────────────────────────
+// PURPOSE: Translate raw stock numbers into plain English for everyday users.
 //
-// Input:  { price, change, volume } (normalized), ticker (string)
-// Output: trimmed insight string, or a safe fallback message
+// WHY THIS EXISTS:
+//   Most stock dashboards dump raw numbers — price, change %, volume — with no
+//   explanation. This function acts as a financial educator: it takes those
+//   same numbers and explains what they actually mean to a beginner. The goal
+//   is not to give advice, but to build understanding.
+//
+// ROLE AS TRANSLATOR:
+//   The prompt instructs Gemini to produce exactly 3 sentences, each covering
+//   one metric (price → change → volume) in plain, jargon-free English.
+//   Each sentence is separated by \n\n so the frontend can optionally style
+//   them as distinct paragraphs.
+//
+// SMART LOCAL FALLBACK:
+//   If Gemini is unavailable (rate-limited, network error, quota exhausted),
+//   the catch block silently generates the same 3-sentence structure
+//   programmatically from the input variables. The user never sees an error
+//   message — they always receive a coherent, readable explanation.
+//   This protects the UX even when the external AI service is down.
+//
+// INPUT:  { price, change, volume } (normalized), ticker (string)
+// OUTPUT: 3 sentences separated by \n\n  |  or the programmatic fallback
 // ─────────────────────────────────────────────────────────────────────────────
 export async function analyzeStock({ price, change, volume }, ticker) {
-    // Guard: if price is missing or "N/A", no meaningful analysis is possible.
-    // Return a safe fallback instead of letting Gemini hallucinate on empty data.
+    // Guard: if price is missing or "N/A", no meaningful education is possible.
+    // Return a safe static message instead of letting Gemini hallucinate.
     if (!price || price === 'N/A') {
         return 'Insufficient data to generate insight.';
     }
 
-    // Build a tightly constrained prompt — low temperature (0.1) + explicit
-    // rules minimise hallucination risk. The model only sees what we pass it.
-    const prompt = `You are a financial data analyst.
+    // ── Educator prompt ───────────────────────────────────────────────────────
+    // Temperature 0.1 → near-deterministic output, minimal hallucination risk.
+    // The model only receives the 3 data points we provide — nothing else.
+    const prompt = `You are an AI financial educator built into a premium stock dashboard. Your goal is to explain real-time stock metrics to a beginner in simple, plain English.
 
 Given the following stock data:
 Ticker: ${ticker}
@@ -160,24 +179,66 @@ Price: $${price}
 Change: ${change}%
 Volume: ${volume}
 
-Write exactly 2 concise sentences describing what this data indicates.
+Write exactly 3 distinct sentences explaining this data. Separate each sentence with a double line break (\n\n).
 
-Rules:
-- Be strictly factual based only on the numbers above
-- Do NOT speculate or predict future prices
-- Do NOT give buy/sell/hold advice
-- Do NOT reference information outside of the data provided
-- If data seems insufficient, state that clearly
-- Output ONLY the 2-sentence insight, nothing else`;
+Structure your response exactly like this:
+Sentence 1: State the current price clearly.
+Sentence 2: Explain the daily change percentage and what it implies about buyer vs. seller momentum today (e.g., positive means buyers are driving it up, negative means sellers are driving it down).
+Sentence 3: Explain the volume and what it indicates about the stock's "pulse" or activity level.
+
+STRICT RULES & EDGE CASES:
+
+NO financial advice. Do NOT suggest buying, selling, or holding.
+
+NO predictions about future prices.
+
+Use simple, beginner-friendly language (no complex jargon).
+
+EDGE CASE 1: If the volume is 0, '0', or 'N/A', you MUST explicitly explain that a volume of zero indicates there is no active trading right now, meaning this price might be from a previous trading session or the market is closed.
+
+EDGE CASE 2: If the change is 0.00%, explain that the price has remained completely flat with no market movement.
+
+Output ONLY the 3 sentences separated by \\n\\n. No intros, no outros, no markdown bullet points.`;
 
     try {
-        // geminiGenerate handles rate-limit retries internally (up to 3 attempts)
+        // geminiGenerate retries up to 3 times with backoff on rate-limit errors.
         const insight = await geminiGenerate(prompt, 0.1);
         return insight.trim();
     } catch (err) {
-        // If Gemini fails (rate limit exhausted, network error, etc.)
-        // degrade gracefully — stock data still returns, insight is omitted
-        console.warn('analyzeStock: Gemini call failed —', err.message);
-        return 'AI insight temporarily unavailable.';
+        // ── Smart Local Fallback ──────────────────────────────────────────────
+        // Gemini is unavailable (rate limit exhausted, network error, etc.).
+        // Instead of returning a generic error string, we silently generate
+        // the same 3-sentence structure programmatically. The user experience
+        // remains intact — they always receive a readable explanation.
+        console.warn('analyzeStock: Gemini unavailable, using local fallback —', err.message);
+
+        // Parse the change value so we can describe momentum direction.
+        const changeNum = typeof change === 'number' ? change : parseFloat(change);
+
+        // Sentence 1 — current price.
+        const s1 = `${ticker} is currently trading at $${price}.`;
+
+        // Sentence 2 — change and buyer/seller momentum.
+        let s2;
+        if (isNaN(changeNum) || change === 'N/A') {
+            s2 = 'The daily change data is currently unavailable.';
+        } else if (changeNum === 0) {
+            s2 = 'The stock has remained completely flat today, with no movement in either direction — buyers and sellers are perfectly balanced.';
+        } else if (changeNum > 0) {
+            s2 = `The stock is up ${Math.abs(changeNum).toFixed(2)}% today, which means buyers have more momentum than sellers and are pushing the price higher.`;
+        } else {
+            s2 = `The stock is down ${Math.abs(changeNum).toFixed(2)}% today, which means sellers have more momentum than buyers and are pushing the price lower.`;
+        }
+
+        // Sentence 3 — volume and market activity.
+        const volumeNum = typeof volume === 'number' ? volume : parseFloat(volume);
+        let s3;
+        if (volume === 'N/A' || volume === 0 || volume === '0' || isNaN(volumeNum) || volumeNum === 0) {
+            s3 = 'The volume is currently zero, meaning there is no active trading right now — this price may be from a previous trading session or the market might be closed.';
+        } else {
+            s3 = `Today's volume of ${Number(volumeNum).toLocaleString()} shares shows the stock is being actively traded, giving investors confidence that this price reflects real, current market activity.`;
+        }
+
+        return `${s1}\n\n${s2}\n\n${s3}`;
     }
 }
