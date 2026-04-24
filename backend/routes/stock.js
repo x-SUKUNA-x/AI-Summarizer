@@ -18,6 +18,18 @@ const router = Router();
 // }
 const AV_BASE_URL = 'https://www.alphavantage.co/query';
 
+// ── In-memory cache ───────────────────────────────────────────────────
+// Declared at MODULE level so it persists across all requests for the lifetime
+// of the Node process. Each entry shape:
+//   stockCache['AAPL'] = { data: { price, change, volume, insight }, timestamp: <ms> }
+//
+// Why in-memory and not Redis?
+//   This is a free-tier project. In-memory is zero-dependency and survives
+//   the request cycle. It resets on server restart, which is acceptable because
+//   stock prices change frequently anyway.
+const CACHE_TTL_MS = 60_000; // 60 seconds — balances freshness vs AV rate limit
+const stockCache  = {};      // keyed by uppercase ticker symbol
+
 // ── Helper: parse a string value to a float, or return "N/A" ─────────────────
 // Alpha Vantage returns all numbers as strings (e.g., "150.5000").
 // We convert to float for clean output; fallback to "N/A" if missing/invalid.
@@ -55,8 +67,23 @@ router.get('/:ticker', async (req, res) => {
         return res.status(500).json({ error: 'Stock API key not configured on server.' });
     }
 
-    // ── Build Alpha Vantage URL ───────────────────────────────────────────────
-    const url = `${AV_BASE_URL}?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(ticker.toUpperCase())}&apikey=${apiKey}`;
+    // ── Cache check ───────────────────────────────────────────────────
+    // Always normalise to uppercase so 'aapl', 'Aapl', 'AAPL' all share one entry.
+    const cacheKey    = ticker.toUpperCase();
+    const cachedEntry = stockCache[cacheKey];
+
+    if (cachedEntry && (Date.now() - cachedEntry.timestamp < CACHE_TTL_MS)) {
+        // Cache HIT — entry exists and is still fresh.
+        // Return immediately: zero calls to Alpha Vantage or Gemini.
+        console.log(`✅  CACHE HIT: ${cacheKey}`);
+        return res.json(cachedEntry.data);
+    }
+
+    // Cache MISS — either no entry or TTL expired. Proceed with live fetch.
+    console.log(`🔄  CACHE MISS: ${cacheKey}`);
+
+    // ── Build Alpha Vantage URL ───────────────────────────────────────
+    const url = `${AV_BASE_URL}?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(cacheKey)}&apikey=${apiKey}`;
 
     try {
         // ── Fetch from Alpha Vantage (Node 18+ built-in fetch) ────────────────
@@ -124,13 +151,20 @@ router.get('/:ticker', async (req, res) => {
             volume: parseOrNA(quote['06. volume']),
         };
 
-        // ── AI Insight (Phase 2) ──────────────────────────────────────────────
+        // ── AI Insight (Phase 2) ────────────────────────────────────────
         // Call analyzeStock after normalization so it only runs on valid data.
         // It handles its own errors internally — if Gemini fails, it returns a
         // safe fallback string so stock data is never blocked by an AI failure.
-        const insight = await analyzeStock(normalized, ticker.toUpperCase());
+        const insight = await analyzeStock(normalized, cacheKey);
 
-        return res.json({ ...normalized, insight });
+        // ── Cache write ──────────────────────────────────────────────────
+        // Only written here — on the SUCCESS path, after full data is available.
+        // Errors (400, 429, 502, 504) never reach this line, so they are
+        // never cached. A bad response will always trigger a fresh live fetch.
+        const responseData = { ...normalized, insight };
+        stockCache[cacheKey] = { data: responseData, timestamp: Date.now() };
+
+        return res.json(responseData);
 
     } catch (err) {
         // Network failure or unexpected JSON parse error
