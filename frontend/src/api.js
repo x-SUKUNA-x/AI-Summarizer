@@ -95,7 +95,14 @@ export const api = {
     // GET /api/stock/:ticker → { price, change, volume }
     getStock: async (ticker) => {
         const res = await req(`/stock/${encodeURIComponent(ticker.toUpperCase())}`);
-        if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed to fetch stock data'); }
+        if (!res.ok) {
+            const e = await res.json();
+            // Attach the rateLimit flag so the frontend can show a distinct amber
+            // banner instead of the default rose/red error for wrong ticker symbols.
+            const err = new Error(e.error || 'Failed to fetch stock data');
+            err.rateLimit = e.rateLimit || false;
+            throw err;
+        }
         return res.json(); // { price, change, volume }
     },
 };

@@ -167,7 +167,14 @@ router.get('/:ticker', async (req, res) => {
                 // Rate limit hit — AV free tier: 25 req/day, 5 req/min
                 console.warn('⚠️  Alpha Vantage rate limit or info message:', avMessage);
                 return res.status(429).json({
-                    error: 'API limit reached. Please wait a moment and try again.',
+                    // Action: Surface a friendly, informative rate-limit message.
+                    // Why: A raw "API limit reached" error is confusing for non-technical
+                    // users. We tell them what happened, when it resets, and what they
+                    // CAN still do (use cached recent searches). The rateLimit flag lets
+                    // the frontend distinguish this from a user-error (wrong ticker) so
+                    // it can show amber instead of red — communicating "temporary" vs "mistake".
+                    error: "We've hit our data limit for today. Real-time quotes reset at midnight EST. In the meantime, try searching a stock you've already looked up recently — it may still be cached!",
+                    rateLimit: true,
                 });
             }
 

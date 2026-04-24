@@ -13,6 +13,7 @@ export default function StockPage() {
     const [stockData, setStockData]           = useState(null);
     const [loading, setLoading]               = useState(false);
     const [error, setError]                   = useState('');
+    const [isRateLimit, setIsRateLimit]       = useState(false);
     const [recentSearches, setRecentSearches] = useState([]);
 
     // ── Auth state ────────────────────────────────────────────────────────────
@@ -166,6 +167,7 @@ export default function StockPage() {
         if (!cleaned) { setError('Please enter a stock ticker symbol (e.g., AAPL, TCS).'); return; }
 
         setError('');
+        setIsRateLimit(false);
         setStockData(null);
         setIsSaved(false); // reset star for new ticker
         setLoading(true);
@@ -183,6 +185,7 @@ export default function StockPage() {
             await checkWatchlist(cleaned, userId);
         } catch (err) {
             setError(err.message || 'Something went wrong. Please try again.');
+            setIsRateLimit(err.rateLimit || false);
         } finally {
             setLoading(false);
         }
@@ -310,8 +313,12 @@ export default function StockPage() {
                 <AnimatePresence>
                     {error && (
                         <motion.div key="error" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-                            className="rounded-2xl bg-rose-500/10 border border-rose-500/20 px-5 py-4 text-sm text-rose-400 mb-4">
-                            ⚠️ {error}
+                            className={`rounded-2xl px-5 py-4 text-sm mb-4 border ${
+                                isRateLimit 
+                                    ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' 
+                                    : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+                            }`}>
+                            {isRateLimit ? '📊' : '⚠️'} {error}
                         </motion.div>
                     )}
                 </AnimatePresence>
