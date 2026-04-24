@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TrendingUp, TrendingDown, ArrowLeft, Search, Loader2, BarChart2, Sparkles, Star, LogIn, LogOut } from 'lucide-react';
 import { api } from './api';
@@ -8,6 +8,7 @@ import { supabase } from './supabaseClient';
 export default function StockPage() {
 
     // ── Core state ────────────────────────────────────────────────────────────
+    const [searchParams]                      = useSearchParams();
     const [ticker, setTicker]                 = useState('');
     const [stockData, setStockData]           = useState(null);
     const [loading, setLoading]               = useState(false);
@@ -190,6 +191,15 @@ export default function StockPage() {
     const handleKeyDown    = (e) => { if (e.key === 'Enter') handleFetch(); };
     const isPositive       = typeof stockData?.change === 'number' && stockData.change >= 0;
 
+    // ── Hook: Check URL for pre-loaded ticker from Watchlist ──────────────────
+    useEffect(() => {
+        const urlTicker = searchParams.get('ticker');
+        if (urlTicker && !stockData && !loading) {
+            setTicker(urlTicker);
+            handleFetchFor(urlTicker);
+        }
+    }, [searchParams]); // only run when searchParams change (like on mount)
+
     // ── Render ────────────────────────────────────────────────────────────────
     return (
         <div className="min-h-screen bg-[#08080a] text-zinc-100" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
@@ -205,10 +215,15 @@ export default function StockPage() {
 
                 {/* ── Top nav ───────────────────────────────────────────────── */}
                 <div className="flex items-center justify-between mb-8">
-                    <Link to="/" className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-200 transition-colors group">
-                        <ArrowLeft size={14} className="group-hover:-translate-x-0.5 transition-transform" />
-                        Back to chat
-                    </Link>
+                    <div className="flex items-center gap-4">
+                        <Link to="/" className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-200 transition-colors group">
+                            <ArrowLeft size={14} className="group-hover:-translate-x-0.5 transition-transform" />
+                            Back to chat
+                        </Link>
+                        <Link to="/watchlist" className="inline-flex items-center gap-1.5 text-sm font-medium text-amber-500/80 hover:text-amber-400 transition-colors">
+                            <Star size={13} className="fill-amber-500/50" /> Watchlist
+                        </Link>
+                    </div>
 
                     {/* ── Auth button ───────────────────────────────────────── */}
                     {/* Why: Surfaced in the nav so it is always visible without */}
