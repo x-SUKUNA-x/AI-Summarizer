@@ -24,16 +24,25 @@ router.get('/', async (req, res) => {
 
 // POST to watchlist
 router.post('/', async (req, res) => {
+    console.log("Incoming Watchlist Data:", req.body);
     const { ticker } = req.body;
     if (!ticker) return res.status(400).json({ error: 'Ticker is required' });
 
     try {
-        const { error } = await supabase
+        const { data, error } = await supabase
             .from('user_watchlists')
-            .insert({ user_id: FALLBACK_USER_ID, ticker: ticker.toUpperCase() });
+            .insert({ user_id: FALLBACK_USER_ID, ticker: ticker.toUpperCase() })
+            .select()   // ← ADD THIS so Supabase confirms the row was inserted
+            .single();
 
-        if (error && error.code !== '23505') throw error; // Ignore unique constraint violation if already added
-        res.json({ success: true });
+        // Unique constraint = already in watchlist, treat as success
+        if (error && error.code === '23505') {
+            return res.json({ success: true, message: 'Already in watchlist' });
+        }
+
+        if (error) throw error; // any other error is a real failure
+
+        res.json({ success: true, data });
     } catch (err) {
         console.error('Error adding to watchlist:', err);
         res.status(500).json({ error: 'Failed to add to watchlist' });
