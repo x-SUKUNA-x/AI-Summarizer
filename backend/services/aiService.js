@@ -136,41 +136,37 @@ Text:
     return await geminiGenerate(prompt, 0.1);
 }
 
-// ── Gemini stock analysis (Financial Educator) ───────────────────────────────
-// PURPOSE: Translate raw stock numbers into plain English for everyday users.
+// ── Gemini stock analysis (Financial Educator + Why Engine) ──────────────────
+// PURPOSE: Translate raw stock numbers AND news context into plain English.
 //
 // WHY THIS EXISTS:
-//   Most stock dashboards dump raw numbers — price, change %, volume — with no
-//   explanation. This function acts as a financial educator: it takes those
-//   same numbers and explains what they actually mean to a beginner. The goal
-//   is not to give advice, but to build understanding.
+//   Most stock dashboards dump raw numbers with no explanation of *why* a stock
+//   is moving. This function acts as a financial educator AND a news synthesizer:
+//   it explains what the numbers mean AND connects them to real-world events.
 //
-// ROLE AS TRANSLATOR:
-//   The prompt instructs Gemini to produce exactly 3 sentences, each covering
-//   one metric (price → change → volume) in plain, jargon-free English.
-//   Each sentence is separated by \n\n so the frontend can optionally style
-//   them as distinct paragraphs.
+// PHASE 3 UPGRADE — "The Why Engine":
+//   Accepts an optional `headlines` string (top 3 AV NEWS_SENTIMENT article
+//   titles, pre-formatted as "1. [title] 2. [title] 3. [title]").
+//   When present, Gemini adds a 4th sentence connecting today's price action
+//   to the most recent news. When absent (null), it produces 3 sentences.
 //
 // SMART LOCAL FALLBACK:
-//   If Gemini is unavailable (rate-limited, network error, quota exhausted),
-//   the catch block silently generates the same 3-sentence structure
-//   programmatically from the input variables. The user never sees an error
-//   message — they always receive a coherent, readable explanation.
-//   This protects the UX even when the external AI service is down.
+//   If Gemini is unavailable, the catch block generates the same structure
+//   programmatically. If headlines exist, they are appended raw so the user
+//   still sees news context even without the AI layer.
 //
-// INPUT:  { price, change, volume } (normalized), ticker (string)
-// OUTPUT: 3 sentences separated by \n\n  |  or the programmatic fallback
+// INPUT:  { price, change, volume } + ticker (string) + headlines (string|null)
+// OUTPUT: 3–4 sentences separated by \n\n  |  or the programmatic fallback
 // ─────────────────────────────────────────────────────────────────────────────
-export async function analyzeStock({ price, change, volume }, ticker) {
+export async function analyzeStock({ price, change, volume }, ticker, headlines = null) {
     // Guard: if price is missing or "N/A", no meaningful education is possible.
     // Return a safe static message instead of letting Gemini hallucinate.
     if (!price || price === 'N/A') {
         return 'Insufficient data to generate insight.';
     }
 
-    // ── Educator prompt ───────────────────────────────────────────────────────
+    // ── Educator prompt (Phase 3 — with optional news context) ───────────────
     // Temperature 0.1 → near-deterministic output, minimal hallucination risk.
-    // The model only receives the 3 data points we provide — nothing else.
     const prompt = `You are an AI financial educator built into a premium stock dashboard. Your goal is to explain real-time stock metrics to a beginner in simple, plain English.
 
 Given the following stock data:
@@ -179,12 +175,16 @@ Price: $${price}
 Change: ${change}%
 Volume: ${volume}
 
-Write exactly 3 distinct sentences explaining this data. Separate each sentence with a double line break (\n\n).
+Latest News Headlines:
+${headlines ? headlines : 'No recent news available.'}
+
+Write 3 distinct sentences explaining the data. If news headlines are provided, also write a 4th sentence. Separate each sentence with a double line break (\\n\\n).
 
 Structure your response exactly like this:
 Sentence 1: State the current price clearly.
 Sentence 2: Explain the daily change percentage and what it implies about buyer vs. seller momentum today (e.g., positive means buyers are driving it up, negative means sellers are driving it down).
-Sentence 3: Explain the volume and what it indicates about the stock's "pulse" or activity level.
+Sentence 3: Explain the volume and what it indicates about the stock's activity level.
+Sentence 4 (ONLY if news headlines are provided): Synthesize the news headlines into one short sentence explaining how this news might be driving today's market momentum. Do NOT write Sentence 4 if no news is provided.
 
 STRICT RULES & EDGE CASES:
 
@@ -198,7 +198,7 @@ EDGE CASE 1: If the volume is 0, '0', or 'N/A', you MUST explicitly explain that
 
 EDGE CASE 2: If the change is 0.00%, explain that the price has remained completely flat with no market movement.
 
-Output ONLY the 3 sentences separated by \\n\\n. No intros, no outros, no markdown bullet points.`;
+Output ONLY the sentences separated by \\n\\n. No intros, no outros, no markdown bullet points.`;
 
     try {
         // geminiGenerate retries up to 3 times with backoff on rate-limit errors.
@@ -239,6 +239,6 @@ Output ONLY the 3 sentences separated by \\n\\n. No intros, no outros, no markdo
             s3 = `Today's volume of ${Number(volumeNum).toLocaleString()} shares shows the stock is being actively traded, giving investors confidence that this price reflects real, current market activity.`;
         }
 
-        return `${s1}\n\n${s2}\n\n${s3}`;
+        return `${s1}\n\n${s2}\n\n${s3}${headlines ? `\n\nRecent news: ${headlines}` : ''}`;
     }
 }

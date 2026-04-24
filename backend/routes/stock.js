@@ -82,38 +82,75 @@ router.get('/:ticker', async (req, res) => {
     // Cache MISS — either no entry or TTL expired. Proceed with live fetch.
     console.log(`🔄  CACHE MISS: ${cacheKey}`);
 
-    // ── Build Alpha Vantage URL ───────────────────────────────────────
-    const url = `${AV_BASE_URL}?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(cacheKey)}&apikey=${apiKey}`;
+    // ── Build Alpha Vantage URLs ──────────────────────────────────────────────
+    // Two endpoints built here so they can fire concurrently via Promise.all.
+    const quoteUrl = `${AV_BASE_URL}?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(cacheKey)}&apikey=${apiKey}`;
+    const newsUrl  = `${AV_BASE_URL}?function=NEWS_SENTIMENT&tickers=${encodeURIComponent(cacheKey)}&apikey=${apiKey}`;
 
     try {
-        // ── Fetch from Alpha Vantage (Node 18+ built-in fetch) ────────────────
-        // AbortController gives us a hard 8-second timeout.
-        // AV free tier can be slow — this prevents the request from hanging
-        // indefinitely and blocking the response.
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        // ── Action: Fetch Market Context (Concurrent) ─────────────────────────
+        // Why: Firing both requests concurrently with Promise.all means total wait
+        // time is max(quoteTime, newsTime) not quoteTime + newsTime. On AV free
+        // tier this saves 2–4 seconds per cache miss.
+        //
+        // The quote has an 8s AbortController. News has its own 6s controller
+        // inside fetchNews(). If news fails for any reason it returns null —
+        // the quote path is never blocked or crashed by a news failure.
+        const quoteController = new AbortController();
+        const quoteTimeout    = setTimeout(() => quoteController.abort(), 8000);
 
-        let response;
-        try {
-            response = await fetch(url, { signal: controller.signal });
-        } catch (fetchErr) {
-            // AbortError = timeout; any other error = network failure
-            const isTimeout = fetchErr.name === 'AbortError';
-            return res.status(504).json({
-                error: isTimeout
-                    ? 'Stock service timed out. Please try again.'
-                    : 'Stock service unavailable.',
-            });
-        } finally {
-            clearTimeout(timeoutId); // always clear timer to prevent memory leak
-        }
+        // ── Action: Fetch News Headlines (Graceful Degradation) ───────────────
+        // Why: News context lets Gemini answer "why is this stock moving today?"
+        // It is always optional — if NEWS_SENTIMENT is rate-limited, slow, or
+        // unavailable we silently return null and produce 3 sentences instead of 4.
+        const fetchNews = async () => {
+            try {
+                const newsController = new AbortController();
+                const newsTimeout    = setTimeout(() => newsController.abort(), 6000);
+                const newsRes        = await fetch(newsUrl, { signal: newsController.signal });
+                clearTimeout(newsTimeout);
 
-        if (!response.ok) {
-            // Non-2xx from Alpha Vantage itself (rare, but handle it)
+                if (!newsRes.ok) return null;
+
+                const newsData = await newsRes.json();
+
+                if (!newsData?.feed || newsData.feed.length === 0) return null;
+
+                // Extract top 3 headlines — enough context without bloating the prompt.
+                return newsData.feed
+                    .slice(0, 3)
+                    .map((article, i) => `${i + 1}. ${article.title}`)
+                    .join(' ');
+            } catch {
+                return null; // timeout / network error / rate limit — always degrade gracefully
+            }
+        };
+
+        // Fire quote + news at the exact same time.
+        let quoteResponse;
+        const [resolvedQuote, headlines] = await Promise.all([
+            fetch(quoteUrl, { signal: quoteController.signal }).catch((fetchErr) => {
+                clearTimeout(quoteTimeout);
+                const isTimeout = fetchErr.name === 'AbortError';
+                return res.status(504).json({
+                    error: isTimeout
+                        ? 'Stock service timed out. Please try again.'
+                        : 'Stock service unavailable.',
+                });
+            }),
+            fetchNews(),
+        ]);
+        clearTimeout(quoteTimeout);
+        quoteResponse = resolvedQuote;
+
+        // If the quote handler already sent an error response above, stop.
+        if (res.headersSent) return;
+
+        if (!quoteResponse.ok) {
             return res.status(502).json({ error: 'Stock service unavailable.' });
         }
 
-        const data = await response.json();
+        const data = await quoteResponse.json();
 
         // ── Validate response structure ───────────────────────────────────────
         // "Global Quote" key is absent when:
@@ -151,11 +188,11 @@ router.get('/:ticker', async (req, res) => {
             volume: parseOrNA(quote['06. volume']),
         };
 
-        // ── AI Insight (Phase 2) ────────────────────────────────────────
-        // Call analyzeStock after normalization so it only runs on valid data.
-        // It handles its own errors internally — if Gemini fails, it returns a
-        // safe fallback string so stock data is never blocked by an AI failure.
-        const insight = await analyzeStock(normalized, cacheKey);
+        // ── AI Insight (Phase 3 — Why Engine) ────────────────────────────────
+        // Pass headlines as a third argument so Gemini can synthesize a 4th
+        // sentence explaining the news driving today's price movement.
+        // If headlines is null (news unavailable), analyzeStock produces 3 sentences.
+        const insight = await analyzeStock(normalized, cacheKey, headlines);
 
         // ── Cache write ──────────────────────────────────────────────────
         // Only written here — on the SUCCESS path, after full data is available.
