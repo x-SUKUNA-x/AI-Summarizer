@@ -135,3 +135,49 @@ Text:
 
     return await geminiGenerate(prompt, 0.1);
 }
+
+// ── Gemini stock analysis ─────────────────────────────────────────────────────
+// Generates a 2-sentence factual insight grounded strictly in the provided
+// stock data. Called after normalization in routes/stock.js.
+//
+// Input:  { price, change, volume } (normalized), ticker (string)
+// Output: trimmed insight string, or a safe fallback message
+// ─────────────────────────────────────────────────────────────────────────────
+export async function analyzeStock({ price, change, volume }, ticker) {
+    // Guard: if price is missing or "N/A", no meaningful analysis is possible.
+    // Return a safe fallback instead of letting Gemini hallucinate on empty data.
+    if (!price || price === 'N/A') {
+        return 'Insufficient data to generate insight.';
+    }
+
+    // Build a tightly constrained prompt — low temperature (0.1) + explicit
+    // rules minimise hallucination risk. The model only sees what we pass it.
+    const prompt = `You are a financial data analyst.
+
+Given the following stock data:
+Ticker: ${ticker}
+Price: $${price}
+Change: ${change}%
+Volume: ${volume}
+
+Write exactly 2 concise sentences describing what this data indicates.
+
+Rules:
+- Be strictly factual based only on the numbers above
+- Do NOT speculate or predict future prices
+- Do NOT give buy/sell/hold advice
+- Do NOT reference information outside of the data provided
+- If data seems insufficient, state that clearly
+- Output ONLY the 2-sentence insight, nothing else`;
+
+    try {
+        // geminiGenerate handles rate-limit retries internally (up to 3 attempts)
+        const insight = await geminiGenerate(prompt, 0.1);
+        return insight.trim();
+    } catch (err) {
+        // If Gemini fails (rate limit exhausted, network error, etc.)
+        // degrade gracefully — stock data still returns, insight is omitted
+        console.warn('analyzeStock: Gemini call failed —', err.message);
+        return 'AI insight temporarily unavailable.';
+    }
+}

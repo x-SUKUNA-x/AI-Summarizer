@@ -41,7 +41,15 @@ export default function StockPage() {
         }
     };
 
-    // ── Allow Enter key to trigger fetch ─────────────────────────────────────
+    // ── Input change handler ───────────────────────────────────────────────
+    // Strip any non-letter characters as the user types (tickers are always alpha).
+    // toUpperCase() auto-capitalises so the user never needs to think about case.
+    const handleTickerChange = (e) => {
+        const lettersOnly = e.target.value.replace(/[^a-zA-Z]/g, '').toUpperCase();
+        setTicker(lettersOnly);
+    };
+
+    // ── Allow Enter key to trigger fetch ──────────────────────────────────
     const handleKeyDown = (e) => {
         if (e.key === 'Enter') handleFetch();
     };
@@ -108,10 +116,12 @@ export default function StockPage() {
                             id="stock-ticker-input"
                             type="text"
                             value={ticker}
-                            onChange={(e) => setTicker(e.target.value)}
+                            onChange={handleTickerChange}
                             onKeyDown={handleKeyDown}
                             placeholder="e.g. AAPL, TCS, TSLA"
                             maxLength={10}
+                            autoComplete="off"
+                            spellCheck={false}
                             className="
                                 flex-1 bg-[#0a0a0d] border border-white/[0.08] rounded-xl
                                 px-4 py-3 text-sm text-zinc-100 placeholder-zinc-600
@@ -122,13 +132,13 @@ export default function StockPage() {
                         <button
                             id="stock-fetch-button"
                             onClick={handleFetch}
-                            disabled={loading}
+                            disabled={loading || !ticker.trim()}
                             className="
                                 inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold text-white
                                 bg-gradient-to-r from-indigo-500 to-purple-600
                                 hover:from-indigo-400 hover:to-purple-500
                                 shadow-[0_0_20px_rgba(99,102,241,0.35)] hover:shadow-[0_0_30px_rgba(99,102,241,0.5)]
-                                disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none
+                                disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none disabled:hover:translate-y-0
                                 transition-all duration-300 hover:-translate-y-0.5 active:scale-95
                             "
                         >
@@ -155,6 +165,49 @@ export default function StockPage() {
                         </motion.div>
                     )}
                 </AnimatePresence>
+
+                {/* ── Empty state ────────────────────────────────────────────── */}
+                {/* Shown before the first successful fetch — gives demo a clean open state */}
+                <AnimatePresence>
+                    {!stockData && !loading && !error && (
+                        <motion.div
+                            key="empty"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="flex flex-col items-center gap-3 py-16 text-center"
+                        >
+                            <div className="w-14 h-14 rounded-2xl bg-[#0f0f12] border border-dashed border-white/[0.08] flex items-center justify-center">
+                                <BarChart2 size={22} className="text-zinc-700" />
+                            </div>
+                            <p className="text-zinc-500 text-sm">Search for a stock to see data</p>
+                            <p className="text-zinc-700 text-xs">Try AAPL, TSLA, MSFT, TCS…</p>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                {/* ── Loading shimmer ─────────────────────────────────────── */}
+                {/* Shown while fetch is in-flight. stockData is null at this point */}
+                {/* so this is the only place where the shimmer can actually render. */}
+                {loading && (
+                    <div className="space-y-3 mt-2 animate-pulse">
+                        {/* Stat card skeletons — 3 columns matching the real grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            {[...Array(3)].map((_, i) => (
+                                <div key={i} className="rounded-2xl bg-[#0f0f12] border border-white/[0.05] p-5 space-y-3">
+                                    <div className="h-2.5 w-16 rounded bg-white/[0.06]" />
+                                    <div className="h-7 w-24 rounded bg-white/[0.04]" />
+                                </div>
+                            ))}
+                        </div>
+                        {/* AI insight skeleton */}
+                        <div className="rounded-2xl bg-[#0f0f12] border border-indigo-500/10 p-5 space-y-2">
+                            <div className="h-2.5 w-20 rounded bg-indigo-500/10" />
+                            <div className="h-2.5 w-full rounded bg-white/[0.04]" />
+                            <div className="h-2.5 w-4/5 rounded bg-white/[0.04]" />
+                        </div>
+                    </div>
+                )}
 
                 {/* ── Results ──────────────────────────────────────────────── */}
                 <AnimatePresence>
@@ -216,6 +269,40 @@ export default function StockPage() {
                                     delay={0.1}
                                 />
                             </div>
+
+                            {/* ── AI Insight (Phase 2) ─────────────────────────────── */}
+                            {/* Only renders when backend returns an insight string.  */}
+                            {/* Loading / error states naturally produce no stockData, */}
+                            {/* so this block is invisible in those cases.            */}
+                            {stockData.insight && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: 12 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: 0.18, duration: 0.35 }}
+                                    className="mt-4 rounded-2xl bg-[#0f0f12] border border-indigo-500/15 p-5 relative overflow-hidden"
+                                >
+                                    {/* Subtle ambient glow */}
+                                    <div className="absolute -top-6 -right-6 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+
+                                    {/* Section label */}
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <Sparkles size={13} className="text-indigo-400" />
+                                        <p className="text-[10px] uppercase tracking-widest font-semibold text-indigo-400">
+                                            AI Insight
+                                        </p>
+                                    </div>
+
+                                    {/* Insight text — plain prose, no formatting */}
+                                    <p className="text-sm text-zinc-300 leading-relaxed">
+                                        {stockData.insight}
+                                    </p>
+
+                                    {/* Disclaimer — makes the AI nature of this explicit */}
+                                    <p className="text-[10px] text-zinc-600 mt-3">
+                                        Generated by Gemini · Strictly factual · Not financial advice
+                                    </p>
+                                </motion.div>
+                            )}
 
                             {/* Data source attribution */}
                             <p className="text-[10px] text-zinc-700 mt-4 text-center">

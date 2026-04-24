@@ -1,5 +1,6 @@
 /* global process */
 import { Router } from 'express';
+import { analyzeStock } from '../services/aiService.js';
 
 const router = Router();
 
@@ -59,11 +60,30 @@ router.get('/:ticker', async (req, res) => {
 
     try {
         // ── Fetch from Alpha Vantage (Node 18+ built-in fetch) ────────────────
-        const response = await fetch(url);
+        // AbortController gives us a hard 8-second timeout.
+        // AV free tier can be slow — this prevents the request from hanging
+        // indefinitely and blocking the response.
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+        let response;
+        try {
+            response = await fetch(url, { signal: controller.signal });
+        } catch (fetchErr) {
+            // AbortError = timeout; any other error = network failure
+            const isTimeout = fetchErr.name === 'AbortError';
+            return res.status(504).json({
+                error: isTimeout
+                    ? 'Stock service timed out. Please try again.'
+                    : 'Stock service unavailable.',
+            });
+        } finally {
+            clearTimeout(timeoutId); // always clear timer to prevent memory leak
+        }
 
         if (!response.ok) {
             // Non-2xx from Alpha Vantage itself (rare, but handle it)
-            return res.status(502).json({ error: `Alpha Vantage returned status ${response.status}.` });
+            return res.status(502).json({ error: 'Stock service unavailable.' });
         }
 
         const data = await response.json();
@@ -83,14 +103,14 @@ router.get('/:ticker', async (req, res) => {
                 // Rate limit hit — AV free tier: 25 req/day, 5 req/min
                 console.warn('⚠️  Alpha Vantage rate limit or info message:', avMessage);
                 return res.status(429).json({
-                    error: 'API rate limit reached. Please wait a moment and try again.',
+                    error: 'API limit reached. Please wait a moment and try again.',
                 });
             }
 
             // Invalid symbol — "Global Quote" is empty object {}
             // 400 = bad client input (the ticker they sent doesn't exist)
             return res.status(400).json({
-                error: `No data found for ticker "${ticker.toUpperCase()}". Check the symbol and try again.`,
+                error: 'Invalid stock symbol. Please check and try again.',
             });
         }
 
@@ -104,7 +124,13 @@ router.get('/:ticker', async (req, res) => {
             volume: parseOrNA(quote['06. volume']),
         };
 
-        return res.json(normalized);
+        // ── AI Insight (Phase 2) ──────────────────────────────────────────────
+        // Call analyzeStock after normalization so it only runs on valid data.
+        // It handles its own errors internally — if Gemini fails, it returns a
+        // safe fallback string so stock data is never blocked by an AI failure.
+        const insight = await analyzeStock(normalized, ticker.toUpperCase());
+
+        return res.json({ ...normalized, insight });
 
     } catch (err) {
         // Network failure or unexpected JSON parse error
