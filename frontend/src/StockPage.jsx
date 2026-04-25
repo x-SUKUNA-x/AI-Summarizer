@@ -44,12 +44,21 @@ export default function StockPage() {
         setIsSaved(!was);
         try {
             const t = ticker.toUpperCase();
+            let res;
             if (was) {
-                await fetch(`http://localhost:5001/api/watchlist/${t}`, { method: 'DELETE' });
+                res = await fetch(`http://localhost:5001/api/watchlist/${t}`, { method: 'DELETE' });
             } else {
-                await fetch('http://localhost:5001/api/watchlist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticker: t }) });
+                res = await fetch('http://localhost:5001/api/watchlist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticker: t }) });
             }
-        } catch { setIsSaved(was); }
+            if (!res.ok) {
+                const errText = await res.text();
+                console.error("Watchlist Fetch Error:", errText);
+                throw new Error("Failed to save");
+            }
+        } catch (err) {
+            console.error("Watchlist toggle failed:", err);
+            setIsSaved(was);
+        }
         finally { setWlBusy(false); }
     };
 
