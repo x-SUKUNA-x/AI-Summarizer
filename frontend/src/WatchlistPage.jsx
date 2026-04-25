@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Star, ArrowRight, TrendingUp, TrendingDown, Trash2 } from 'lucide-react';
 import { StockHeader } from './components/app/StockHeader';
+import { API_BASE } from './config';
 
 export default function WatchlistPage() {
     const navigate = useNavigate();
@@ -13,7 +14,7 @@ export default function WatchlistPage() {
         async function load() {
             setLoading(true);
             try {
-                const res  = await fetch('http://localhost:5001/api/watchlist');
+                const res  = await fetch(`${API_BASE}/watchlist`);
                 const data = await res.json();
                 const tickers = data.map(r => r.ticker);
 
@@ -21,7 +22,7 @@ export default function WatchlistPage() {
 
                 const withData = await Promise.all(tickers.map(async sym => {
                     try {
-                        const r = await fetch(`http://localhost:5001/api/stock/${sym}`);
+                        const r = await fetch(`${API_BASE}/stock/${sym}`);
                         if (!r.ok) throw new Error();
                         const s = await r.json();
                         return { sym, name: s.name || sym, price: s.price !== 'N/A' ? s.price : 0, change: s.change !== 'N/A' ? s.change : 0, target: s.price !== 'N/A' ? s.price * (1 + ((sym.charCodeAt(0) * 9301 + 49297) % 233280) / 233280 * 0.1 - 0.05) : 0 };
@@ -36,7 +37,7 @@ export default function WatchlistPage() {
 
     const remove = async (sym) => {
         setWatchlist(prev => prev.filter(i => i.sym !== sym));
-        await fetch(`http://localhost:5001/api/watchlist/${sym}`, { method: 'DELETE' }).catch(() => {});
+        await fetch(`${API_BASE}/watchlist/${sym}`, { method: 'DELETE' }).catch(() => {});
     };
 
     return (
