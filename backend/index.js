@@ -55,8 +55,9 @@ const app = express();
 // allowed through — the !origin check handles that case.
 // -----------------------------------------------------------------------------
 const ALLOWED_ORIGINS = [
-    /^http:\/\/localhost:\d+$/,   // any localhost port — dev only
-    process.env.FRONTEND_URL,     // e.g. https://your-app.vercel.app
+    /^http:\/\/localhost:\d+$/,       // any localhost port — dev only
+    /^https:\/\/.*\.vercel\.app$/,    // any Vercel preview/prod deployment
+    process.env.FRONTEND_URL,         // explicit production URL if set
 ].filter(Boolean);
 
 app.use(cors({
