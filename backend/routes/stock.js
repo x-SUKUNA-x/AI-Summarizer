@@ -105,6 +105,7 @@ router.get('/:ticker', async (req, res) => {
 
     // Guard: fail fast if the API key is missing rather than making a doomed request
     const apiKey = process.env.STOCK_API_KEY;
+    
     if (!apiKey) {
         return res.status(500).json({ error: 'Server misconfiguration: STOCK_API_KEY not set.' });
     }

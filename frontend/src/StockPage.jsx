@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Search, Star, ArrowRight, DollarSign, Activity, BarChart2, Sparkles, TrendingUp, TrendingDown } from 'lucide-react';
 import { api } from './api';
 import { supabase } from './supabaseClient';
+import { API_BASE } from './config';
 import { Line } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler } from 'chart.js';
 import { StockHeader } from './components/app/StockHeader';
@@ -31,7 +32,7 @@ export default function StockPage() {
 
     const checkWatchlist = async (sym) => {
         try {
-            const res = await fetch('http://localhost:5001/api/watchlist');
+            const res = await fetch(`${API_BASE}/watchlist`, { credentials: 'include' });
             const data = await res.json();
             setIsSaved(data.map(r => r.ticker).includes(sym.toUpperCase()));
         } catch { setIsSaved(false); }
@@ -46,9 +47,9 @@ export default function StockPage() {
             const t = ticker.toUpperCase();
             let res;
             if (was) {
-                res = await fetch(`http://localhost:5001/api/watchlist/${t}`, { method: 'DELETE' });
+                res = await fetch(`${API_BASE}/watchlist/${t}`, { method: 'DELETE', credentials: 'include' });
             } else {
-                res = await fetch('http://localhost:5001/api/watchlist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticker: t }) });
+                res = await fetch(`${API_BASE}/watchlist`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticker: t }) });
             }
             if (!res.ok) {
                 const errText = await res.text();

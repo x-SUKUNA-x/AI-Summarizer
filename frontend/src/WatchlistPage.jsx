@@ -14,7 +14,7 @@ export default function WatchlistPage() {
         async function load() {
             setLoading(true);
             try {
-                const res  = await fetch(`${API_BASE}/watchlist`);
+                const res  = await fetch(`${API_BASE}/watchlist`, { credentials: 'include' });
                 const data = await res.json();
                 const tickers = data.map(r => r.ticker);
 
@@ -37,7 +37,7 @@ export default function WatchlistPage() {
 
     const remove = async (sym) => {
         setWatchlist(prev => prev.filter(i => i.sym !== sym));
-        await fetch(`${API_BASE}/watchlist/${sym}`, { method: 'DELETE' }).catch(() => {});
+        await fetch(`${API_BASE}/watchlist/${sym}`, { method: 'DELETE', credentials: 'include' }).catch(() => {});
     };
 
     return (
