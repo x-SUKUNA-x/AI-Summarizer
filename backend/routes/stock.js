@@ -16,11 +16,12 @@
 //   - Layered error handling: HTTP errors, API-level errors, empty data
 //   - AI insight with smart local fallback if Gemini is unavailable
 // -----------------------------------------------------------------------------
-
+import { authMiddleware } from '../middleware/authMiddleware.js';
 import { Router } from 'express';
 import { analyzeStock } from '../services/aiService.js';
 
 const router = Router();
+router.use(authMiddleware);
 
 // -----------------------------------------------------------------------------
 // fix: removed stray dev console.log that was logging API key status on every
