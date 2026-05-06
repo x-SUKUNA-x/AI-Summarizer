@@ -46,6 +46,19 @@ const MS_BASE_URL = 'https://api.marketstack.com/v1/eod';
 const CACHE_TTL_MS = 600_000; // 10 minutes
 const stockCache = {};
 
+// ── Cache cleanup ──────────────────────────────────────────────
+// Runs every 10 minutes, deletes entries older than TTL
+// Prevents RAM growing indefinitely as more tickers are searched
+setInterval(() => {
+    const now = Date.now();
+    for (const ticker in stockCache) {
+        if (now - stockCache[ticker].timestamp > CACHE_TTL_MS) {
+            delete stockCache[ticker];
+            console.log(`Cache evicted: ${ticker}`);
+        }
+    }
+}, CACHE_TTL_MS);
+
 // -----------------------------------------------------------------------------
 // fix: expanded Indian stock list from 23 → 50+ tickers to reduce "not found"
 //      errors for common NSE stocks that were previously missing from the list
